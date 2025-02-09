@@ -11,7 +11,7 @@ spring:
             - Path=/api/users/** # /api/users/** -> user-service(8081)? ???
           filters:
             - AddRequestHeader=User-Header, MyValue
-            - RewritePath=/api/users/(?<segment>.*), /$\{segment}
+            - RewritePath=/api/users/(?<segment>.*), /users/$\{segment}
 
         - id: order-service
           uri: http://localhost:8082
@@ -19,4 +19,4 @@ spring:
             - Path=/api/orders/** # /api/orders/** -> order-service(8082)? ???
           filters:
             - AddRequestHeader=Order-Header, MyValue
-            - RewritePath=/api/orders/(?<segment>.*), /$\{segment}
+            - RewritePath=/api/orders/(?<segment>.*), /orders/$\{segment}
