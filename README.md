@@ -133,7 +133,7 @@ spring:
             - Path=/api/users/**
           filters:
             - AddRequestHeader=User-Header, MyValue
-            - RewritePath=/api/users/(?<segment>.*), /$\{segment}  
+            - RewritePath=/api/users/(?<segment>.*), /users/$\{segment}  
 
         - id: order-service
           uri: http://localhost:8082
@@ -141,7 +141,7 @@ spring:
             - Path=/api/orders/**
           filters:
             - AddRequestHeader=Order-Header, MyValue
-            - RewritePath=/api/orders/(?<segment>.*), /$\{segment}
+            - RewritePath=/api/orders/(?<segment>.*), /orders/$\{segment}
 ```
 ✔️ /api/users/** → user-service (8081)로 라우팅
 ✔️ /api/orders/** → order-service (8082)로 라우팅
@@ -165,14 +165,14 @@ spring:
 - 백엔드 서비스가 특정 헤더값이 있을 경우에만 처리를 하도록 제한할 수 있다.
 - 인증, 로깅, 추적의 목적으로 추가 헤더를 활용할 수 있다.
 
-**2. RewritePath=/api/users/(?<segment>.*), /$\{segment}**
+**2. RewritePath=/api/users/(?<segment>.*), /users/$\{segment}**
 - 요청 URL을 백엔드 서비스로 전달하기 전에 특정 패턴을 Rewrite(다시 쓰는) 역할을 한다. 
 - `/api/users/(?<segment>.*)` 를 보면 /api/users 뒤에 오는 값을 segment에 저장하고 `/$\{segment}` 이것으로 다시 쓴다
 - 예를 들면,
   - 클라이언트로부터 `GET /api/users/123` 요청이 들어오면
-  - Gateway 내부에서 `/123` 으로 Rewrite 해서
-  - 백엔드 서비스로 `GET /123` 만 전달하는 것이다.
-- 즉 여기서는, /api/users 를 떼고 백엔드 서비스로 전달한다고 볼 수 있다.
+  - Gateway 내부에서 `/users/123` 으로 Rewrite 해서
+  - 백엔드 서비스로 `GET /users/123` 만 전달하는 것이다.
+- 즉 여기서는, /api 를 떼고 백엔드 서비스로 전달한다고 볼 수 있다.
 
 ✨ 효과:
 - Gateway와 백엔드 서비스의 경로를 다르게 설정할 수 있어서 유연한 라우팅이 가능하다.
@@ -181,7 +181,94 @@ spring:
 **정리**
 위 설정이 적용되면, 클라이언트가 GET /api/users/123 요청을 보냈을 때 다음과 같은 변환이 일어남
 ```http request
-GET /123 HTTP/1.1
+GET /users/123 HTTP/1.1
 Host: gateway.example.com
 User-Header: MyValue
 ``` 
+
+### 3️⃣ user-service (회원 서비스) 만들기
+**📌 🔧 application.yml 설정**
+```yaml
+server:
+  port: 8081
+```
+
+**📌 👨‍💻 Controller 생성**
+```java
+@RestController
+@RequestMapping("/users")
+public class UserController {
+    
+    @GetMapping("/{userId}")
+    public ResponseEntity<Map<String, String>> getUser(@PathVariable String userId) {
+        Map<String, String> user = new HashMap<>();
+        user.put("userId", userId);
+        user.put("name", "Taeyi Park");
+        return ResponseEntity.ok(user);
+    }
+}
+```
+
+### 4️⃣ order-service (주문 서비스) 만들기
+**📌 🔧 application.yml 설정**
+```yaml
+server:
+  port: 8082
+```
+
+**📌 👨‍💻 Controller 생성**
+```java
+@RestController
+@RequestMapping("/orders")
+public class OrderController {
+
+    @GetMapping("/{orderId}")
+    public ResponseEntity<Map<String, String>> getOrder(@PathVariable String orderId) {
+        Map<String, String> order = new HashMap<>();
+        order.put("orderId", orderId);
+        order.put("status", "shipped");
+
+        return ResponseEntity.ok(order);
+    }
+}
+```
+
+### 5️⃣ 테스트
+
+**유저 서비스 요청**
+```shell
+curl -X GET "http://localhost:8000/api/users/123"
+```
+
+**유저 서비스 응답**
+![user-service-response](./images/user-service-response.jpg)
+
+**주문 서비스 요청**
+```shell
+curl -X GET "http://localhost:8000/api/orders/234"
+```
+
+**주문 서비스 응답**
+![order-service-response](./images/order-service-response.jpg)
+
+### 🥊 트러블 슈팅
+1. Spring Cloud Gateway: Unable to load io.netty.resolver.dns.macos.MacOSDnsServerAddressStreamProvider
+    ```bash
+    ERROR 97288 --- [gateway-service] [ctor-http-nio-2] i.n.r.d.DnsServerAddressStreamProviders  : Unable to load io.netty.resolver.dns.macos.MacOSDnsServerAddressStreamProvider, fallback to system defaults. This may result in incorrect DNS resolutions on MacOS. Check whether you have a dependency on 'io.netty:netty-resolver-dns-native-macos'. Use DEBUG level to see the full stack: java.lang.UnsatisfiedLinkError: failed to load the required native library
+    ```
+   - 이 오류는 Spring Cloud Gateway가 내부적으로 Netty를 사용하면서, MacOS에서 DNS 관련 네이티브 라이브러리를 찾지 못해서 발생하는 문제
+   - 아래의 의존성 추가
+      ```bash
+      implementation 'io.netty:netty-resolver-dns-native-macos:4.1.68.Final:osx-aarch_64'
+      ```
+
+2. 401 Unauthorized 반환 
+   user-service 로 `GET http://localhost:8000/api/users/123` 요청을 보내보았는데, 401 Unauthorized 응답코드가 와서 검색을 해보았더니,
+
+   Spring Boot 2.7+ 버전부터는 Spring Security 의존성을 추가하면, 자동으로 기본 보안 설정이 추가된다고 한다.
+
+    즉, SpringSecurity를 만들지 않아도, 모든 요청에 인증을 요구하는 설정이 적용된다고 한다.
+
+    내가 user-service에 Spring Security 의존성을 추가해두어서 401 에러가 난 것.
+
+    그래서 해당 의존성을 주석 처리하고 요청을 보내봤더니 제대로 응답이 왔다.
